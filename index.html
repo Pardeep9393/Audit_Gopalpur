@@ -543,13 +543,25 @@ async function loadData(){
     rawRows = [];
     for(let r = 2; r < rows.length; r++){
       const c = rows[r].c;
-      if(!c || !c[0] || c[0].v === null || c[0].v === '') continue;
-      const ean = String(c[0] && (c[0].v ?? c[0].f) || '');
+      if(!c) continue;
+      // gviz mixed-type fix: column A has both numeric EANs (8906...) and text
+      // EANs (DK_...). gviz picks ONE dominant type for the column and returns
+      // v:null for every cell of the other type — so those rows used to be
+      // silently dropped (their SYS / Phy qty never reached the totals).
+      // Ab row tab hi skip hogi jab poori row actually khaali ho.
+      const eanCell = c[0];
+      let ean = eanCell ? String((eanCell.v ?? eanCell.f) ?? '').trim() : '';
       const sys = cellNum(c[1]);
       const phy = cellNum(c[2]);
       const teamVals = [];
       for(let t = teamStartIdx; t < typeColIdx; t++){
         teamVals.push(cellNum(c[t]));
+      }
+      if(!ean){
+        const hasData = sys !== 0 || phy !== 0 || teamVals.some(v => v !== 0);
+        if(!hasData) continue;                       // truly blank row
+        ean = '(EAN unreadable – sheet row ' + (r + 1) + ')';
+        console.warn('[audit-dashboard] EAN cell came back null from gviz (mixed-type column A) — kept row', r + 1, {sys, phy});
       }
       const variance = phy - sys;
       const type = variance < 0 ? 'Short' : (variance > 0 ? 'Excess' : 'Match');
