@@ -558,8 +558,10 @@ async function loadData(){
         teamVals.push(cellNum(c[t]));
       }
       if(!ean){
-        const hasData = sys !== 0 || phy !== 0 || teamVals.some(v => v !== 0);
-        if(!hasData) continue;                       // truly blank row
+        // Row tabhi blank hai jab A..end tak koi bhi cell ka value na ho.
+        // (0-qty "Match QTY" rows ke B/C cells mein v:0 hota hai, isliye wo keep hongi.)
+        const hasAnyCell = c.some(cell => cell && cell.v !== null && cell.v !== undefined && cell.v !== '');
+        if(!hasAnyCell) continue;                    // truly blank row
         ean = '(EAN unreadable – sheet row ' + (r + 1) + ')';
         console.warn('[audit-dashboard] EAN cell came back null from gviz (mixed-type column A) — kept row', r + 1, {sys, phy});
       }
@@ -584,6 +586,15 @@ async function loadData(){
     await combinedPromise;
 
     statusEl.textContent = `Loaded ${rawRows.length} EAN rows across ${teamNames.length} teams.`;
+    // Reconciliation: sheet ke apne totals row (row 1: SUBTOTAL) se dashboard ka SYS / Phy total compare.
+    {
+      const sheetSys = cellNum(totalsRow[1]), sheetPhy = cellNum(totalsRow[2]);
+      const dashSys = rawRows.reduce((s,r)=>s+r.sys,0), dashPhy = rawRows.reduce((s,r)=>s+r.phy,0);
+      if(sheetSys !== dashSys || sheetPhy !== dashPhy){
+        statusEl.textContent += ` ⚠ Mismatch vs sheet — SYS: sheet ${fmt(sheetSys)} / dashboard ${fmt(dashSys)}, Phy: sheet ${fmt(sheetPhy)} / dashboard ${fmt(dashPhy)}.`;
+        console.warn('[audit-dashboard] totals mismatch', {sheetSys, dashSys, sheetPhy, dashPhy});
+      }
+    }
     document.getElementById('lastUpdated').textContent = new Date().toLocaleString('en-IN');
     resetCountdown();
   }catch(err){
