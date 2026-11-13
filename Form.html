@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ext_Audit Dot&Key Gopalpur — Bin Scanner</title>
+<title>Audit Bin Scanner — Honasa FRK</title>
 <style>
   :root{--bg:#f3f5f9;--card:#fff;--bd:#d9dfea;--tx:#17202e;--mu:#6b778c;--ac:#1a73e8;--ok:#1e9e5a;--er:#d93b4f}
   *{box-sizing:border-box}
@@ -27,9 +27,13 @@
   .item{border:1px solid var(--bd);border-radius:10px;padding:10px;margin-top:10px}
   .item.flash{border-color:var(--ok);background:#effaf4}
   .ean{font-weight:700;font-size:15px;display:flex;justify-content:space-between;gap:8px}
-  .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+  .fields{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+  .fields.f3{grid-template-columns:repeat(3,1fr)}
   .fields input{font-size:16px;padding:8px}
   .fields label{font-size:10px}
+  .sl{margin-top:6px;font-size:13px;color:var(--mu)}
+  .sl.bad{color:var(--er);font-weight:600}
+  .sl b{color:var(--tx)}
   .tot{margin-top:8px;font-size:13px;color:var(--mu);display:flex;align-items:center;gap:12px}
   .more{padding:7px 12px;font-size:13px}
   .x{background:none;color:var(--er);padding:0 6px;font-size:18px}
@@ -39,19 +43,32 @@
   .done{text-align:center;padding:30px 16px}
   .done .big{font-size:42px}
   .sum{font-size:13px;color:var(--mu);margin-top:8px}
-  @media(max-width:460px){.fields{grid-template-columns:repeat(2,1fr)}}
+  .clist{margin-top:12px;max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+  .clist button{background:#e8ecf4;color:var(--tx);text-align:left;font-size:16px}
+  .clist button:active{background:var(--ac);color:#fff}
+  .cinfo{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .cinfo b{font-size:18px}
+  .net{padding:10px 12px;border-radius:8px;font-size:14px;margin-bottom:10px;font-weight:600}
+  .net.off{background:#d93b4f;color:#fff}
+  .net.on{background:#e4f6ec;color:var(--ok)}
+  @media(max-width:460px){.fields{grid-template-columns:repeat(2,1fr)}.fields.f3{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="top"><h1>📦 Audit Bin Scanner <span style="font-size:12px;color:var(--mu);font-weight:600">· Dot&amp;Key Gopalpur</span></h1><div class="who" id="who"></div></div>
+<div class="top"><h1>📦 Audit Bin Scanner</h1><div class="who" id="who"></div></div>
+<div id="net"></div>
 <div id="app"></div>
+<div class="sum" style="text-align:center;margin-top:16px">Form v2.5 · server mfg-v4</div>
 
 <script>
 // ====== CONFIG: Apps Script Web App URL yahan paste karo ======
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxyKi6q83SfMMi67DNw60-N7chRV3IsKWJgehUKTdjJvfE9oBuTUnqHA27Moj4ut2ZhcQ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbziwBWUGBTlajORuGSqyVouJaKH5cYzzqZn_ldsWTXC_Q-m8eyEwoEcIiv4cxNQFymg3A/exec';
+// MFG + Expiry dono compulsory? (true = bharna zaroori, false = optional but ek bhara to dono chahiye)
+const REQUIRE_DATES = true;
+const SERVER_VER = 'mfg-v4';   // Code.gs ke VER se match hona chahiye
 // ===============================================================
 
-const KEY = 'auditBinState_dotkey_gopalpur_v1';
+const KEY = 'auditBinState_honasa_frk_v2';
 let S = load() || { auditor:'', stage:'login', shelf:'', items:[], binId:'', saved:null };
 let busy = false, err = '';
 
@@ -67,7 +84,71 @@ function now(){
 const n = v => Number(v) || 0;
 const total = i => n(i.box) * n(i.caseSize) + n(i.loose);
 
+// ---------- month/year helpers (MFG / Expiry = MM/YYYY) ----------
+// Month ko integer index me rakhte hain: year*12 + (month-1)
+function parseMY(s){
+  const m = /^(\d{1,2})\/(\d{4})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  const mo = +m[1], y = +m[2];
+  if (mo < 1 || mo > 12 || y < 2000 || y > 2100) return null;
+  return y * 12 + (mo - 1);
+}
+function fmtMY(k){ return String(k % 12 + 1).padStart(2,'0') + '/' + Math.floor(k / 12); }
+// Expiry - MFG in months
+function monthsBetween(a, b){ return (a && b && b > a) ? (b - a) : ''; }
+// typing mask: 0325 / 3/2025 / 03/2025 -> 03/2025
+function maskMY(el){
+  let v = el.value;
+  if (/^\d\//.test(v)) v = '0' + v;
+  let d = v.replace(/\D/g, '').slice(0, 6);
+  if (d.length === 1 && d > '1') d = '0' + d;
+  if (d.length >= 3) d = d.slice(0, 2) + '/' + d.slice(2);
+  el.value = d;
+  return d;
+}
+function slInfo(i){
+  const a = parseMY(i.mfg), b = parseMY(i.exp);
+  if (!a || !b) return { txt:'Shelf life: —', bad:false };
+  if (b <= a) return { txt:'⚠ Expiry MFG se pehle/barabar hai', bad:true };
+  return { txt:'Shelf life: <b>' + monthsBetween(a, b) + ' months</b>', bad:false };
+}
+function setSl(idx){
+  const el = document.getElementById('sl' + idx); if (!el) return;
+  const s = slInfo(S.items[idx]);
+  el.innerHTML = s.txt; el.className = 'sl' + (s.bad ? ' bad' : '');
+}
+
+// ---------- internet / device safety ----------
+function netUi(msgOn){
+  const el = document.getElementById('net'); if (!el) return;
+  if (!navigator.onLine) el.innerHTML = '<div class="net off">📵 Internet band hai — scan data is device me safe hai. Scan chalta rahega; Close Bin net aane par karna.</div>';
+  else if (msgOn) { el.innerHTML = '<div class="net on">✅ Internet wapas aa gaya.</div>'; setTimeout(()=>{ if (navigator.onLine) el.innerHTML=''; }, 3000); }
+  else el.innerHTML = '';
+}
+window.addEventListener('offline', () => { netUi(); alert('⚠️ Internet band ho gaya!\n\nBin auto-close nahi hoga. Aapka data is device me safe hai — scan jari rakho, net aane par Close Bin dabao.'); });
+window.addEventListener('online', () => netUi(true));
+window.addEventListener('beforeunload', ev => { if (S.stage === 'bin' && S.items.length) { ev.preventDefault(); ev.returnValue = ''; } });
+
+// Server ka code naya hai ya purana — POST se ping (wahi route jo save ke liye chalta hai)
+// Purana Code.gs 'Unknown action' bhejta hai bina version ke -> save block hota hai
+async function serverOk(){
+  // 1) naya Code.gs: POST ping -> ver
+  try {
+    const r = await fetch(SCRIPT_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ action:'ping' }) });
+    const j = await r.json();
+    if (j && j.ver === SERVER_VER) return true;
+  } catch (e) { throw e; }   // net issue — save attempt nahi
+  // 2) thoda purana mfg-v2 Code.gs (ping nahi, par GET me ver hai)
+  try {
+    const r = await fetch(SCRIPT_URL, { cache:'no-store' });
+    const j = await r.json();
+    return !!j && j.ver === SERVER_VER;
+  } catch (e) { return false; }
+}
+function colLetter(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; }
+
 function render(focusId){
+  netUi();
   document.getElementById('who').textContent = S.auditor ? '👤 ' + S.auditor : '';
   const a = document.getElementById('app');
   const e = err ? `<div class="msg er">${esc(err)}</div>` : '';
@@ -90,6 +171,7 @@ function render(focusId){
     a.innerHTML = `<div class="card done"><div class="big">✅</div>
       <h2 style="margin:8px 0">Bin Closed & Saved</h2>
       <div class="sum">${esc(S.saved.shelf)} — ${S.saved.count} EAN, ${S.saved.qty} units</div>
+      ${S.saved.cols ? `<div class="sum">MFG / Expiry / Shelf Life → sheet columns ${esc(S.saved.cols)}</div>` : ''}
       <div style="margin-top:18px"><button onclick="startNew()" style="width:100%">➕ Start New Bin</button></div></div>`;
     return;
   }
@@ -110,13 +192,21 @@ function render(focusId){
 }
 
 function itemHtml(i, idx){
+  const s = slInfo(i);
   return `<div class="item" id="it${idx}">
     <div class="ean"><span>${esc(i.ean)}</span><button class="x" onclick="delItem(${idx})">✕</button></div>
     <div class="fields">
+      <div><label>MRP (optional)</label><input type="number" inputmode="decimal" value="${i.mrp}" oninput="upd(${idx},'mrp',this.value)"></div>
       <div><label>Case Size</label><input type="number" inputmode="numeric" value="${i.caseSize}" oninput="upd(${idx},'caseSize',this.value)"></div>
       <div><label>Box Count</label><input type="number" inputmode="numeric" value="${i.box}" oninput="upd(${idx},'box',this.value)"></div>
       <div><label>Loose QTY</label><input type="number" inputmode="numeric" value="${i.loose}" oninput="upd(${idx},'loose',this.value)"></div>
     </div>
+    <div class="fields f3">
+      <div><label>MFG (MM/YYYY)</label><input id="mf${idx}" type="text" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="MM/YYYY" value="${esc(i.mfg || '')}" oninput="updDate(${idx},'mfg',this.value,this)"></div>
+      <div><label>Expiry (months)</label><input id="mo${idx}" type="number" inputmode="numeric" min="0" step="1" placeholder="24 / 36" value="${esc(i.months || '')}" oninput="updDate(${idx},'months',this.value)"></div>
+      <div><label>Expiry (MM/YYYY)</label><input id="ex${idx}" type="text" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="MM/YYYY" value="${esc(i.exp || '')}" oninput="updDate(${idx},'exp',this.value,this)"></div>
+    </div>
+    <div class="sl${s.bad ? ' bad' : ''}" id="sl${idx}">${s.txt}</div>
     <div class="tot"><button class="sec more" onclick="scanMore()">➕ Scan more EAN</button><span>Total: <b id="tt${idx}">${total(i)}</b></span></div></div>`;
 }
 
@@ -141,7 +231,7 @@ function scanEan(code){
   err = '';
   let idx = S.items.findIndex(i => i.ean === code);
   if (idx > -1) S.items[idx].loose = n(S.items[idx].loose) + 1;
-  else { S.items.push({ ean:code, mrp:'', caseSize:'', box:'', loose:1, time:now() }); idx = S.items.length - 1; }
+  else { S.items.push({ ean:code, mrp:'0', caseSize:'', box:'', loose:1, mfg:'', exp:'', months:'', time:now() }); idx = S.items.length - 1; }
   persist(); render('ean');
   const el = document.getElementById('it' + idx);
   if (el) { el.classList.add('flash'); el.scrollIntoView({block:'nearest'}); setTimeout(()=>el.classList.remove('flash'), 600); }
@@ -151,6 +241,30 @@ function upd(idx, f, v){
   S.items[idx][f] = v; persist();
   const t = document.getElementById('tt' + idx); if (t) t.textContent = total(S.items[idx]);
 }
+
+// MFG / months / Expiry — auto calculation:
+//  MFG + months  -> Expiry auto
+//  MFG + Expiry  -> months (shelf life) auto
+function updDate(idx, f, v, el){
+  const it = S.items[idx];
+  if (el && (f === 'mfg' || f === 'exp')) v = maskMY(el);
+  it[f] = v;
+  const moEl = document.getElementById('mo' + idx), exEl = document.getElementById('ex' + idx);
+  const mfg = parseMY(it.mfg);
+
+  if (f === 'exp') {
+    const b = parseMY(it.exp);
+    if (mfg && b && b > mfg) { it.months = String(b - mfg); if (moEl) moEl.value = it.months; }
+  } else if (mfg && n(it.months) > 0) {
+    // 'mfg' ya 'months' badla — months bhara hai to expiry nikalo
+    it.exp = fmtMY(mfg + Math.round(n(it.months))); if (exEl) exEl.value = it.exp;
+  } else if (f === 'mfg' && mfg && parseMY(it.exp)) {
+    const b = parseMY(it.exp);
+    if (b > mfg) { it.months = String(b - mfg); if (moEl) moEl.value = it.months; }
+  }
+  persist(); setSl(idx);
+}
+
 function scanMore(){
   const el = document.getElementById('ean');
   if (el) { el.value = ''; el.scrollIntoView({block:'center'}); el.focus(); }
@@ -165,32 +279,43 @@ function startNew(confirmNeeded){
 async function closeBin(){
   if (busy) return;
   err = '';
+  if (!navigator.onLine) { err = 'Internet nahi hai — bin open hai aur data safe hai. Net aane par Close Bin dabao.'; return render(); }
   if (!S.items.length) { err = 'Koi EAN scan nahi hua.'; return render(); }
   for (const i of S.items) {
     if (n(i.box) > 0 && n(i.caseSize) <= 0) { err = `EAN ${i.ean}: Box count hai to Case Size bharo.`; return render(); }
     if (total(i) <= 0) { err = `EAN ${i.ean}: Qty 0 hai — hatao ya qty bharo.`; return render(); }
+    const a = parseMY(i.mfg), b = parseMY(i.exp);
+    if (REQUIRE_DATES && (!a || !b)) { err = `EAN ${i.ean}: MFG aur Expiry MM/YYYY format me bharo (ya months daalo).`; return render(); }
+    if (!REQUIRE_DATES && (!!a !== !!b)) { err = `EAN ${i.ean}: MFG aur Expiry dono MM/YYYY me bharo (ya dono khali chhodo).`; return render(); }
+    if (a && b && b <= a) { err = `EAN ${i.ean}: Expiry MFG se baad ki honi chahiye.`; return render(); }
   }
   const qty = S.items.reduce((s,i)=>s+total(i),0);
   if (!confirm(`Bin ${S.shelf} close karein?\n${S.items.length} EAN, ${qty} units`)) return;
   busy = true; render();
+  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 30000);
   try {
+    if (!(await serverOk())) throw new Error('Server pe PURANA Code.gs chal raha hai — MFG/Expiry save nahi hoga. Apps Script me naya Code.gs paste karke Deploy > Manage deployments > Edit > New version karo, aur Form ka SCRIPT_URL wahi deployment ho. Bin open hai, data safe hai');
     const res = await fetch(SCRIPT_URL, {
-      method:'POST',
+      method:'POST', signal: ctl.signal,
       headers:{'Content-Type':'text/plain;charset=utf-8'},   // no CORS preflight
       body: JSON.stringify({ action:'saveBin', binId:S.binId, auditor:S.auditor, shelf:S.shelf, items:S.items })
     });
     const j = await res.json();
     if (!j.ok) throw new Error(j.error || 'Save failed');
-    S.saved = { shelf:S.shelf, count:S.items.length, qty };
+    S.saved = { shelf:S.shelf, count:S.items.length, qty, cols:(j.cols || []).map(colLetter).join(', ') };
     S.stage = 'done'; S.items = []; S.shelf = ''; S.binId = '';
   } catch (ex) {
     err = 'Save nahi hua (' + ex.message + '). Dobara Close Bin dabao — duplicate nahi banega.';
   }
+  clearTimeout(tm);
   busy = false; persist(); render();
 }
 
 if (S.stage === 'bin' && !S.shelf) S.stage = 'loc';
+if (S.stage === 'client') S.stage = 'loc';
+if (S.stage === 'bin' && S.items.length) err = '';
 render();
+if (S.stage === 'bin' && S.items.length) { const el = document.getElementById('net'); if (el && navigator.onLine) { el.innerHTML = '<div class="net on">↩️ Pichla bin wahin se resume ho gaya (' + S.items.length + ' EAN).</div>'; setTimeout(()=>{ if (navigator.onLine) el.innerHTML=''; }, 4000); } }
 </script>
 </body>
 </html>
